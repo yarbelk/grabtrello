@@ -17,11 +17,88 @@ package cmd
 import (
 	"fmt"
 	"log"
+	"os"
+	"path"
 
+	mytrello "github.com/VojtechVitek/go-trello"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/yarbelk/grabtrello/trello"
 )
+
+func writeBoards(outputDir string, boards []mytrello.Board) error {
+	if _, err := os.Stat(outputDir); err != nil {
+		return err
+	}
+
+	os.Chdir(outputDir)
+	fd, err := os.Create("index.md")
+	defer fd.Close()
+	if err != nil {
+		return err
+	}
+
+	for _, board := range boards {
+		os.Mkdir(board.Name, os.ModeDir|os.ModePerm)
+		fmt.Fprintf(fd, "- [%s](%s/index.md)\n", board.Name, board.Name)
+		if err := writeLists(path.Join(outputDir, board.Name), board); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeLists(outputDir string, board mytrello.Board) error {
+	if _, err := os.Stat(outputDir); err != nil {
+		return err
+	}
+
+	fd, err := os.Create(path.Join(outputDir, "index.md"))
+	defer fd.Close()
+	if err != nil {
+		return err
+	}
+
+	lists, err := board.Lists()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(fd, "# %s\n", board.Name)
+
+	for _, list := range lists {
+		fmt.Fprintf(fd, "\n# %s\n", list.Name)
+		cards, err := list.Cards()
+		if err != nil {
+			return err
+		}
+		for _, card := range cards {
+			fmt.Fprintf(fd, "- [%s](%s.md)\n", card.Name, path.Join(list.Name, card.Name))
+			writeCard(outputDir, list, card)
+		}
+	}
+	return nil
+}
+
+func writeCard(outputDir string, list mytrello.List, card mytrello.Card) error {
+	if _, err := os.Stat(outputDir); err != nil {
+		return err
+	}
+	outputDir = path.Join(outputDir, list.Name)
+
+	os.Mkdir(outputDir, os.ModeDir|os.ModePerm)
+	fd, err := os.Create(path.Join(outputDir, fmt.Sprintf("%s.md", card.Name)))
+	defer fd.Close()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(fd, "# %s\n\n", card.Name)
+	fmt.Fprintf(fd, "link: %s\n\n", card.ShortUrl)
+	fmt.Fprintf(fd, "## Desc\n\n%s\n", card.Desc)
+
+	return nil
+}
 
 // getCmd represents the get command
 var getCmd = &cobra.Command{
@@ -36,11 +113,11 @@ to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		key, token := viper.GetString("key"), viper.GetString("token")
 		var userName string
-		if len(args) != 1 {
-			userName = viper.GetString("user")
-		} else {
-			userName = args[0]
+		if len(args) != 2 {
+			log.Fatal("need 2 args")
 		}
+		userName = args[0]
+		outputDir := args[1]
 
 		user, err := trello.Member(userName, key, &token)
 		if err != nil {
@@ -51,9 +128,7 @@ to quickly create a Cobra application.`,
 		if err != nil {
 			log.Fatal(err)
 		}
-		for _, board := range boards {
-			fmt.Printf("* %v (%v)\n", board.Name, board.ShortUrl)
-		}
+		writeBoards(outputDir, boards)
 	},
 }
 
